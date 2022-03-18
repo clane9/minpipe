@@ -41,13 +41,13 @@ pipeline = Sequential(
 )
 
 pipeline.start()
-pipeline.stop()
+pipeline.join()
 ```
 
 ## Installation
 
 ```
-pip install pype
+pip install git+https://github.com/clane9/pype.git
 ```
 
 ## See also

@@ -12,6 +12,8 @@ logging.basicConfig(
 
 
 def test_sequential():
+    np.random.seed(2022)
+
     def make_random_data():
         x = np.random.randn(10, 10, 10000)
 
@@ -48,5 +50,12 @@ def test_sequential():
         Stage(printout, num_workers=0),
     )
 
+    logging.info("Short serial test run")
+    pipeline.serial(max_items=10)
+
+    logging.info("Full serial test run")
+    pipeline.serial()
+
+    logging.info("Concurrent run")
     pipeline.start()
     pipeline.join()

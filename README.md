@@ -6,7 +6,7 @@ Pype is a minimal library for building one-off concurrent data pipelines in pyth
 
 ```python
 import numpy as np
-from pype import Sequential, Signal, Stage
+from pype import Pipeline, Signal, Stage
 
 def make_random_data():
     x = np.random.randn(10, 10, 10000)
@@ -32,13 +32,16 @@ def filter_pos(m):
 def printout(m):
     print(f"mean={m:.2f}")
 
-pipeline = Sequential(
+pipeline = Pipeline(
     Stage(make_random_data()),
     Stage(mean, num_workers=2),
     Stage(flatten, num_workers=1),
     Stage(filter_pos),
     Stage(printout),
 )
+
+# serial debug run
+# pipeline.serial(max_items=100)
 
 pipeline.start()
 pipeline.join()

@@ -3,30 +3,31 @@ A minimal library for building one-off concurrent data pipelines.
 """
 
 import logging
+import queue
 from enum import Enum
-from multiprocessing import Lock, Process, Queue
+from multiprocessing import Process, Queue
 from threading import Thread
 from typing import Any, Callable, Iterable, List, Optional, Union
 
 __version__ = "0.1.0"
 
-StageFunction = Callable[..., Iterable[Any]]
+StageFunction = Union[Callable[[], Iterable[Any]], Callable[[Any], Iterable[Any]]]
 StageGroup = Union["Stage", List["Stage"]]
 
 
 class Stage:
     """
     A concurrent processing stage. The processing work is performed by a `StageFunction`
-    `func` which operates on a group of 0 or more inputs and returns an iterable of
-    outputs. For a given group of inputs, the function may generate 0 or more outputs,
-    enabling filtering, mapping, and flat mapping. Zero input stages are called initial
-    stages and can be used for reading data from external sources. Initial stages should
-    generate a `Signal.STOP` signal when finished.
+    `func` which accepts 0 or 1 inputs and returns an iterable of 0 or more outputs.
+    Zero input stages are called initial stages and can be used for reading data from
+    external sources. Initial stages should generate a `Signal.STOP` signal when
+    finished.
 
     `name` is an optional name for the stage. By default, the name of `func` is used.
     `num_workers` sets the number of parallel workers used. When `num_workers` is 0,
-    the stage runs in a `Thread` within the main process. `maxsize` is the maximum size
-    for the stage's input queue(s). When `maxsize <= 0`, the input queue is unbounded.
+    the stage runs in a `Thread` within the main process. Multiple workers are not
+    supported for initial stages. `maxsize` is the maximum size for the stage's input
+    queue. When `maxsize <= 0`, the input queue is unbounded.
     """
 
     def __init__(
@@ -40,10 +41,10 @@ class Stage:
         self.name = name if name is not None else func.__name__
         self.num_workers = num_workers
         self.maxsize = maxsize
-        self._in = []
-        self._out = []
-        self._in_stages = []
-        self._out_stages = []
+        self._in = None
+        self._out = None
+        self._in_stage = None
+        self._out_stage = None
         self._is_running = False
 
         if num_workers > 0:
@@ -53,50 +54,48 @@ class Stage:
             ]
         else:
             self._procs = [Thread(target=self._worker, daemon=True)]
-        self._lock = Lock()
 
-    def pipe(self, other: StageGroup):
+    def pipe(self, other: "Stage"):
         """
-        Pipe the stage's output to another stage or group of stages.
+        Pipe the stage's output to another stage.
         """
         assert not self._is_running, "no new pipes after starting"
 
-        if isinstance(other, Stage):
-            other = [other]
+        logging.info("New pipe: %s -> %s", self.name, other.name)
+        # use an mp queue if communicating between processes
+        mp = max(self.num_workers, other.num_workers) > 0
+        self._out = other._new_channel(mp)
+        self._out_stage = other
+        other._in_stage = self
 
-        for stage in other:
-            logging.info("New pipe: %s -> %s", self.name, stage.name)
-            q = stage._new_channel()
-            self._out.append(q)
-            self._out_stages.append(stage)
-            stage._in_stages.append(self)
-
-    def _new_channel(self):
+    def _new_channel(self, mp=False):
         assert not self._is_running, "no new pipes after starting"
-        q = Queue(self.maxsize)
-        self._in.append(q)
+
+        q = Queue(self.maxsize) if mp else queue.Queue(self.maxsize)
+        self._in = q
         return q
 
     def _worker(self, rank: int = 0):
         logging.info("Starting %s/%d", self.name, rank)
         assert (
-            rank == 0 or len(self._in) > 0
+            rank == 0 or self._in is not None
         ), "multiple workers for initial stages are not supported"
 
         while True:
-            # avoid a race that could cause workers to get inconsistent items
-            # from multiple inputs
-            with self._lock:
-                inputs = [q.get() for q in self._in]
-            closed = [inp is Signal.STOP for inp in inputs]
-            if any(closed):
-                logging.info("Received stop signal in %s/%d; exiting", self.name, rank)
-                assert all(closed), "some but not all input queues are closed"
-                if rank == 0:
-                    self._send_stop()
-                return
+            if self._in is None:
+                outputs = self.func()
+            else:
+                inpt = self._in.get()
+                if inpt is Signal.STOP:
+                    logging.info(
+                        "Received stop signal in %s/%d; exiting", self.name, rank
+                    )
+                    if rank == 0:
+                        self._send_stop()
+                    return
 
-            outputs = self.func(*inputs)
+                outputs = self.func(inpt)
+
             if outputs is not None:
                 for output in outputs:
                     if output is Signal.STOP:
@@ -104,19 +103,19 @@ class Stage:
                             "Generated stop signal in %s/%d; exiting", self.name, rank
                         )
                         assert (
-                            len(self._in) == 0
+                            self._in is None
                         ), "only initial stages should generate stop signals"
                         if rank == 0:
                             self._send_stop()
                         return
 
-                    for q in self._out:
-                        q.put(output)
+                    if self._out is not None:
+                        self._out.put(output)
 
     def _send_stop(self):
-        for q, stage in zip(self._out, self._out_stages):
-            for _ in range(max(stage.num_workers, 1)):
-                q.put(Signal.STOP)
+        if self._out is not None:
+            for _ in range(max(self._out_stage.num_workers, 1)):
+                self._out.put(Signal.STOP)
 
     def start(self):
         """
@@ -137,11 +136,15 @@ class Stage:
 
 class Pipeline:
     """
-    A concurrent pipeline of processing stages.
+    A concurrent pipeline of sequential processing stages.
     """
 
-    def __init__(self, stages: List["Stage"]):
-        self.stages = stages
+    def __init__(self, *args: "Stage"):
+        self.stages = list(args)
+
+        for ii in range(len(self.stages) - 1):
+            head, tail = self.stages[ii : ii + 2]
+            head.pipe(tail)
 
     def start(self):
         """
@@ -180,34 +183,19 @@ class Pipeline:
             return cache
 
         for stage in self.stages:
-            inputs = []
-            for parent in stage._in_stages:
-                # using memory location as unique key for each stage
-                parent_key = id(parent)
-                assert parent_key in dependencies, "pipeline stages must be in order"
-                inputs.append(dependencies[parent_key])
+            if stage.is_initial():
+                # initial stages run only once (empty args tuple)
+                inputs = [()]
+            else:
+                parent_key = id(stage._in_stage)
+                assert parent_key in dependencies, "pipeline stages should be in order"
+                # convert to args tuple inpt -> (inpt,)
+                inputs = zip(dependencies[parent_key])
 
-            # note, initial stages are called only once
-            inputs = zip(*inputs) if len(inputs) > 0 else [()]
             dependencies[id(stage)] = run(stage, inputs)
 
         results = [dependencies[id(stage)] for stage in self.stages]
         return results
-
-
-class Sequential(Pipeline):
-    """
-    A pipeline consisting of a sequence of stages.
-    """
-
-    def __init__(self, *args: "Stage"):
-        stages = list(args)
-
-        for ii in range(len(stages) - 1):
-            head, tail = stages[ii : ii + 2]
-            head.pipe(tail)
-
-        super().__init__(stages)
 
 
 class Signal(Enum):

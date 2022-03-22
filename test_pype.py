@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from pype import Sequential, Signal, Stage
+from pype import Pipeline, Signal, Stage
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -42,12 +42,12 @@ def test_sequential():
         ii, jj, m = inpt
         logging.info(f"({ii},{jj}) mean={m:.2f}")
 
-    pipeline = Sequential(
+    pipeline = Pipeline(
         Stage(make_random_data()),
         Stage(mean, num_workers=2),
         Stage(flatten, num_workers=1),
-        Stage(filter, num_workers=1),
-        Stage(printout, num_workers=0),
+        Stage(filter),
+        Stage(printout),
     )
 
     logging.info("Short serial test run")
@@ -59,3 +59,7 @@ def test_sequential():
     logging.info("Concurrent run")
     pipeline.start()
     pipeline.join()
+
+
+if __name__ == "__main__":
+    test_sequential()

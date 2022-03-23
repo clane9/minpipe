@@ -7,12 +7,11 @@ import queue
 from enum import Enum
 from multiprocessing import Process, Queue
 from threading import Thread
-from typing import Any, Callable, Iterable, List, Optional, Union
+from typing import Any, Callable, Iterable, Optional, Union
 
 __version__ = "0.1.0"
 
 StageFunction = Union[Callable[[], Iterable[Any]], Callable[[Any], Iterable[Any]]]
-StageGroup = Union["Stage", List["Stage"]]
 
 
 class Stage:
@@ -183,7 +182,7 @@ class Pipeline:
             return cache
 
         for stage in self.stages:
-            if stage.is_initial():
+            if stage._in is None:
                 # initial stages run only once (empty args tuple)
                 inputs = [()]
             else:

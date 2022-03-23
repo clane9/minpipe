@@ -7,7 +7,7 @@ README = (HERE / "README.md").read_text()
 
 
 def get_version():
-    path = HERE / "pype.py"
+    path = HERE / "minpipe.py"
     py = open(path, "r").readlines()
     version_line = [l.strip() for l in py if l.startswith("__version__")][0]
     version = version_line.split("=")[-1].strip().strip("'\"")
@@ -15,15 +15,15 @@ def get_version():
 
 
 setup(
-    name="pype",
+    name="minpipe",
     version=get_version(),
     author="Connor Lane",
     license="MIT",
-    url="https://github.com/clane9/pype",
+    url="https://github.com/clane9/minpipe",
     description="A minimal library for building one-off concurrent data pipelines",
     long_description=README,
     long_description_content_type="text/markdown",
-    py_modules=["pype"],
+    py_modules=["minpipe"],
     include_package_data=True,
     python_requires=">=3.7",
 )

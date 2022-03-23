@@ -1,12 +1,12 @@
-# Pype
+# minpipe
 
-Pype is a minimal library for building one-off concurrent data pipelines in python. It was inspired by [pypeln](https://github.com/cgarciae/pypeln).
+minpipe is a minimal library for building one-off concurrent data pipelines in python. It was inspired by [pypeln](https://github.com/cgarciae/pypeln).
 
 ## Example
 
 ```python
 import numpy as np
-from pype import Pipeline, Signal, Stage
+from minpipe import Pipeline, Signal, Stage
 
 def make_random_data():
     x = np.random.randn(10, 10, 10000)
@@ -41,7 +41,7 @@ pipeline = Pipeline(
 )
 
 # serial debug run
-# pipeline.serial(max_items=100)
+# pipeline.serial(max_items=10)
 
 pipeline.start()
 pipeline.join()
@@ -50,7 +50,7 @@ pipeline.join()
 ## Installation
 
 ```
-pip install git+https://github.com/clane9/pype.git
+pip install git+https://github.com/clane9/minpipe.git
 ```
 
 ## See also

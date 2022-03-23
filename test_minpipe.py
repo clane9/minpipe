@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-from pype import Pipeline, Signal, Stage
+from minpipe import Pipeline, Signal, Stage
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",

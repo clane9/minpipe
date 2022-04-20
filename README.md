@@ -50,7 +50,7 @@ pipeline.join()
 ## Installation
 
 ```
-pip install git+https://github.com/clane9/minpipe.git
+pip install minpipe
 ```
 
 ## See also
